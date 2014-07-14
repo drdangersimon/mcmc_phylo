@@ -4,7 +4,7 @@
 treefile=relbiogeog_newtree.tre
 
 #the data
-datafile = dist_4.data
+datafile=dist_2.data
 
 #from most recent to oldest 
 periods = 18.6302,1

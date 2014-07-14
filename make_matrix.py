@@ -266,7 +266,7 @@ if __name__ == '__main__':
     save_file = open(out_files, 'w')
     for i in xrange(len(lik)):
         row = make_row(matrix[i])
-        save_file.write(''.join(str([lik[i]]+row)))[1:-1]
+        save_file.write(''.join(str([lik[i]]+row))[1:-1])
     save_file.close()
 
     
