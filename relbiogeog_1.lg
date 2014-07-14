@@ -1,0 +1,42 @@
+ #B
+#the tree or trees, trees will be calculated in serial 
+#newick files only!
+treefile=relbiogeog_newtree.tre
+
+#the data
+datafile = dist_4.data
+
+#from most recent to oldest 
+periods = 18.6302,1
+
+ratematrix=mcmc_run.rm
+periods=20.0 
+
+#area names for the columns in test.data
+areanames = G N D E W M
+
+#pound denotes a comment
+
+#most recent common ancestor designation
+#mrca = ONEUP a d
+#fixnode = ONEUP 100
+
+#not this distribution
+#excludedists = 101
+
+#only these distributions
+#includedists = 100,010,011,001,110
+#includedists = 100,010,011,001,110
+
+#only distributions with 2 or fewer areas
+includedists = 2
+
+#calculate all ancestral states
+ancstate = _all_
+#states
+
+#or the splits (traditional lagrange)
+splits
+
+#with full dispersal estimated
+#estimate_dispersal_mask
