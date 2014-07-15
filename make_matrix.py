@@ -89,7 +89,7 @@ class Brute_worker(Process):
         # save paths for later
         self.cmd = cmd
         self.rm_file = rm_file + str(gid)
-        self.matrix_path = '%i.rm\n'%gid
+        self.matrix_path = '%i.rm'%gid
         self.matrix_size = matrix_size
         self.recive_queue = recive_queue
         self.send_queue = send_queue
@@ -115,8 +115,10 @@ def brute_force_parallel(cmd, matrix_size=5, rm_file='relbiogeog_1.lg',
     # Set up multiprocessing object
     request_queue = Queue()
     get_queue = Queue()
+    worker = []
     for i in range(cpu):
-        Brute_worker(cmd, rm_file, matrix_size, i,request_queue, get_queue).start()
+        worker.append(Brute_worker(cmd, rm_file, matrix_size, i,request_queue, get_queue))
+        worker[-1].start()
     # get permutations object
     x ,y = nu.triu_indices(matrix_size)
     # remove diagonal terms
@@ -217,10 +219,10 @@ def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg'):
     # get fitst lik
     lik.append(call_laplace(cmd, rm_file))
     # save
-    past_matrix.append(lik)
+    past_matrix.append(cur_matrix)
     # Run Chain
     for i in xrange(itter):
-    	print '%f out of %f'%(i+0., itter+.0)
+    	print '%i out of %i'%(int(i), int(itter))
         # create matrix
         cur_matrix = chng_matrix(cur_matrix)
         # save
@@ -242,12 +244,19 @@ def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg'):
     return past_matrix, lik
 
 def make_row(mat):
-
     out = []
     for i in mat:
         for j in i:
             out.append(j)
     return out
+
+def save_to_csv(lik, matrix, out_file):
+    '''Saves data to a csv file with lik, matrix_11,matrix_12...'''
+    with open(out_file, 'w') as save_file:
+        for i in xrange(len(lik)):
+            row = make_row(matrix[i])
+            save_file.write(''.join(str([lik[i]]+row))[1:-1]+'\n')
+    
 
 if __name__ == '__main__':
     import sys
@@ -258,15 +267,11 @@ if __name__ == '__main__':
     cmd =sys.argv[1] #'./lagrange_cpp'
     out_files = sys.argv[2]
     #MCMC
-    #matrix, lik = mcmc(cmd)
+    #matrix, lik = mcmc(cmd,50)
     #Brute force
     #matrix, lik = brute_force(cmd)
     #brute force parallel
     matrix, lik = brute_force_parallel(cmd)
-    save_file = open(out_files, 'w')
-    for i in xrange(len(lik)):
-        row = make_row(matrix[i])
-        save_file.write(''.join(str([lik[i]]+row))[1:-1])
-    save_file.close()
+    save_to_csv(lik, matrix, out_files)
 
     
