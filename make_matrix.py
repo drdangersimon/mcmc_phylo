@@ -24,10 +24,12 @@ def call_laplace(cmd, run_file):
         #print text.find('final')
         if text.find('final') >= 0:
             return float(text.split(' ')[-1])
-    print output
-    return 1e99
+    #print output
+    return nu.inf
 
 def generate_inital_matrix(row=5,col=5):
+    '''Gets inital martix only lower triangular values and diagonals
+    are == 1'''
     values = [0, 0.5, 1]
     mat = []
     for i in range(row):
@@ -35,24 +37,26 @@ def generate_inital_matrix(row=5,col=5):
     for Row in xrange(row):
         for Col in xrange(col):
             mat[Row][Col] = random.sample(values, 1)[0]
+            # Set diagonals to 1
+            if Row == Col:
+                 mat[Row][Row] = 1
     return mat
     
 
-def chng_matrix(mat, diagonal= True, values=[0, 0.5, 1]):
-    new_mat = []
-    for i in mat:
-        temp_col = []
-        try:
-            for j in i:
-                temp_col.append(random.sample(values, 1)[0])
-        except:
-            print mat
-            raise
-        new_mat.append(temp_col)
-    return new_mat
-
-
-
+def chng_matrix_item(mat, index, values=[0, 0.5, 1]):
+    '''Changes index in matrix. index is raveled index of matrix 0=[0,0]'''
+    new_mat  = nu.copy(mat)
+    x, y = get_lower_tri(new_mat.shape[0])
+    # change all values in index
+    for i in index:
+        row, col = nu.unravel_index(i, new_mat.shape)
+        new_mat[row, col] = random.sample(values, 1)[0]
+    # If index isn't complte draw new indexs from lower triangle
+    if not len(index) == len(x):
+       sample = nu.ravel_multi_index((x,y),(5,5))
+       index = nu.random.choice(sample, len(index), replace=False)
+    return [list(i) for i in list(new_mat)], list(index)
+        
 def write_matrix(mat, filename):
     matrix_file = open(filename, 'w')
     for row in mat:
@@ -64,6 +68,18 @@ def get_lik(mat_list, cmd, rm_file):
     mat = get_mat(mat_list, matrix_size)
     write_matrix(mat, 'mcmc_run.rm')
     return mat, call_laplace(cmd, rm_file)
+
+def get_lower_tri(matrix_size=5):
+    '''returns indexs of lower matrix, without diagionals'''
+    x ,y = nu.triu_indices(matrix_size)
+    # remove diagonal terms
+    del_array = []
+    for i in xrange(len(x)):
+        if x[i] == y[i]:
+            del_array.append(i)
+    x = nu.delete(x, del_array)
+    y = nu.delete(y, del_array)
+    return x, y
 
 class Brute_worker(Process):
     "class to do parallel brute force"
@@ -206,25 +222,34 @@ def get_mat(mat_list, matrix_size):
         out_mat[i][i] = 1
     
     return out_mat
-    
-def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg'):
+
+
+
+def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg',matrix_size=5):
     '''Does MCMC on data'''
     # intalize values
     past_matrix = []
     lik = []
     # get first matrix
-    cur_matrix = generate_inital_matrix()
-    # Create files
+    cur_matrix =  generate_inital_matrix(matrix_size, matrix_size)
+    # Create file
     write_matrix(cur_matrix, 'mcmc_run.rm')
     # get fitst lik
     lik.append(call_laplace(cmd, rm_file))
     # save
     past_matrix.append(cur_matrix)
+    # Matrix item to change
+    x, y = get_lower_tri(matrix_size)
+    # Change all at first
+    chg_index = list(nu.ravel_multi_index((x,y),(5,5)))
+    # Tuning parameters
+    Naccept = 1.
+    Nreject = 1.
     # Run Chain
     for i in xrange(itter):
     	print '%i out of %i'%(int(i), int(itter))
         # create matrix
-        cur_matrix = chng_matrix(cur_matrix)
+        cur_matrix, chg_index = chng_matrix_item(cur_matrix, chg_index)
         # save
         write_matrix(cur_matrix, 'mcmc_run.rm')
         #get lik
@@ -235,12 +260,14 @@ def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg'):
             # acept
             past_matrix.append(cur_matrix)
             lik.append(new_lik)
+            Naccept += 1.
         else:
             # reject
             past_matrix.append(past_matrix[-1])
             lik.append(lik[-1])
             cur_matrix = past_matrix[-1]
-
+            Nreject += 1.
+        
     return past_matrix, lik
 
 def make_row(mat):
@@ -267,11 +294,11 @@ if __name__ == '__main__':
     cmd =sys.argv[1] #'./lagrange_cpp'
     out_files = sys.argv[2]
     #MCMC
-    #matrix, lik = mcmc(cmd,50)
+    matrix, lik = mcmc(cmd)
     #Brute force
     #matrix, lik = brute_force(cmd)
     #brute force parallel
-    matrix, lik = brute_force_parallel(cmd)
+    #matrix, lik = brute_force_parallel(cmd)
     save_to_csv(lik, matrix, out_files)
 
     
