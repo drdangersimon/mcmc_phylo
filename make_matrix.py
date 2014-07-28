@@ -23,9 +23,9 @@ def call_laplace(cmd, run_file):
     for text in output:
         #print text.find('final')
         if text.find('final') >= 0:
-            return float(text.split(' ')[-1])
+            return -float(text.split(' ')[-1])
     #print output
-    return nu.inf
+    return -nu.inf
 
 def generate_inital_matrix(row=5,col=5):
     '''Gets inital martix only lower triangular values and diagonals
@@ -223,6 +223,87 @@ def get_mat(mat_list, matrix_size):
     
     return out_mat
 
+def parallel_mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg',
+                  matrix_size=5, cpu=cpu_count()):
+    '''Does mcmc but in paralllel'''
+    past_matrix = []
+    lik = []
+    # start workers
+    request_queue = Queue()
+    get_queue = Queue()
+    worker = []
+    for i in xrange(cpu):
+        worker.append(Brute_worker(cmd, rm_file, matrix_size, i,request_queue, get_queue))
+        worker[-1].start()
+    # initalize lik
+    while True:
+        for i in xrange(cpu+1):
+            mat_list = generate_inital_matrix(matrix_size, matrix_size)
+            request_queue.put(nu.ravel(mat_list))
+        temp_lik = -nu.inf
+        for i in xrange(cpu):
+            try:
+                tmat, tlik = get_queue.get(timeout=2)
+            except:
+                break
+            if max(temp_lik, tlik) == tlik:
+                temp_lik = tlik +0
+                mat_list = tmat
+        if nu.isfinite(tlik):
+            break
+    lik.append(temp_lik)
+    past_matrix.append(mat_list)
+    cur_matrix = mat_list
+    # start mcmc
+    for i in xrange(cpu):
+        mat_list = generate_inital_matrix(matrix_size, matrix_size)
+        request_queue.put(nu.ravel(mat_list))
+    # Matrix item to change
+    x, y = get_lower_tri(matrix_size)
+    # Change all at first
+    chg_index = list(nu.ravel_multi_index((x,y),(matrix_size, matrix_size)))
+    # Tuning parameters
+    Naccept = 1.
+    Nreject = 1.
+    ac_rate = .5
+    for i in xrange(itter):
+        print '%i out of %i lik=%.2f'%(int(i), int(itter), lik[-1])
+        # create matrix
+        cur_matrix, chg_index = chng_matrix_item(cur_matrix, chg_index)
+        request_queue.put(nu.ravel(cur_matrix))
+        try:
+            cur_matrix, new_lik = get_queue.get(timeout=1)
+        except:
+            # load up queque
+            for j in range(15):
+                cur_matrix, chg_index = chng_matrix_item(cur_matrix, chg_index)
+                request_queue.put(nu.ravel(cur_matrix))
+            continue
+        mh = exp(-(lik[-1] - new_lik)/2.)
+        if mh > random.uniform(0,1):
+            # acept
+            past_matrix.append(cur_matrix)
+            lik.append(new_lik)
+            Naccept += 1.
+        else:
+            # reject
+            past_matrix.append(past_matrix[-1])
+            lik.append(lik[-1])
+            cur_matrix = past_matrix[-1]
+            Nreject += 1.
+        # aceptance tuning
+        if i % 20 == 0 and i > 0:
+            ac_rate = Naccept / float(i)
+            if ac_rate > .5:
+                # too much acceptance shrink
+                if len(chg_index) > 1:
+                    chg_index.pop(0)
+            if ac_rate < .15:
+                if len(chg_index) < len(x):
+                    chg_index.append(1)
+
+    return past_matrix, lik
+
 
 
 def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg',matrix_size=5):
@@ -241,13 +322,14 @@ def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg',matrix_size=5):
     # Matrix item to change
     x, y = get_lower_tri(matrix_size)
     # Change all at first
-    chg_index = list(nu.ravel_multi_index((x,y),(5,5)))
+    chg_index = list(nu.ravel_multi_index((x,y),(matrix_size, matrix_size)))
     # Tuning parameters
     Naccept = 1.
     Nreject = 1.
+    ac_rate = .5
     # Run Chain
     for i in xrange(itter):
-    	print '%i out of %i'%(int(i), int(itter))
+    	print '%i out of %i acep_rate=%f, lik=%.2f'%(int(i), int(itter),ac_rate, lik[-1])
         # create matrix
         cur_matrix, chg_index = chng_matrix_item(cur_matrix, chg_index)
         # save
@@ -255,7 +337,7 @@ def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg',matrix_size=5):
         #get lik
         new_lik =  call_laplace(cmd,  rm_file)
         # M-H
-        mh = exp((lik[-1] - new_lik)/2.)
+        mh = exp(-(lik[-1] - new_lik)/2.)
         if mh > random.uniform(0,1):
             # acept
             past_matrix.append(cur_matrix)
@@ -267,7 +349,16 @@ def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg',matrix_size=5):
             lik.append(lik[-1])
             cur_matrix = past_matrix[-1]
             Nreject += 1.
-        
+        # aceptance tuning
+        if i % 20 == 0 and i > 0:
+            ac_rate = Naccept / float(i)
+            if ac_rate > .5:
+                # too much acceptance shrink
+                if len(chg_index) > 1:
+                    chg_index.pop(0)
+            if ac_rate < .15:
+                if len(chg_index) < len(x):
+                    chg_index.append(1)
     return past_matrix, lik
 
 def make_row(mat):
@@ -294,7 +385,7 @@ if __name__ == '__main__':
     cmd =sys.argv[1] #'./lagrange_cpp'
     out_files = sys.argv[2]
     #MCMC
-    matrix, lik = mcmc(cmd)
+    matrix, lik = mcmc(cmd,matrix_size=7)
     #Brute force
     #matrix, lik = brute_force(cmd)
     #brute force parallel
