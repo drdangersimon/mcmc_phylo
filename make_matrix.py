@@ -10,7 +10,7 @@ from shutil import copyfile
 
 def call_laplace(cmd, run_file):
     if not os.path.exists(cmd):
-        raise OSError('Your command does not exists.')
+        raise OSError('Cannont find "%s." Please check path'%cmd)
     if  not os.path.exists(run_file):
         raise OSError('Your matrix does not exists.')
     run_cmd = cmd + ' ' + run_file
@@ -237,6 +237,7 @@ def parallel_mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg',
         worker[-1].start()
     # initalize lik
     while True:
+        tlik = nu.nan
         for i in xrange(cpu+1):
             mat_list = generate_inital_matrix(matrix_size, matrix_size)
             request_queue.put(nu.ravel(mat_list))
@@ -317,6 +318,11 @@ def mcmc(cmd, itter=10**4, rm_file='relbiogeog_1.lg',matrix_size=5):
     write_matrix(cur_matrix, 'mcmc_run.rm')
     # get fitst lik
     lik.append(call_laplace(cmd, rm_file))
+    # try till finite value found
+    while not nu.isfinite(lik[-1]):
+        cur_matrix =  generate_inital_matrix(matrix_size, matrix_size)
+        write_matrix(cur_matrix, 'mcmc_run.rm')
+        lik[-1] = call_laplace(cmd, rm_file)
     # save
     past_matrix.append(cur_matrix)
     # Matrix item to change
@@ -382,10 +388,12 @@ if __name__ == '__main__':
     #cmd = 'lagrange/src/lagrange_cpp'
     # Run on Joanne
     #os.chdir('/Users/joannebentley/Desktop')
-    cmd =sys.argv[1] #'./lagrange_cpp'
+    cmd = sys.argv[1] #'./lagrange_cpp'
     out_files = sys.argv[2]
     #MCMC
-    matrix, lik = mcmc(cmd,matrix_size=7)
+    #matrix, lik = mcmc(cmd, matrix_size=7)
+    # Parallel MCMC
+    matrix, lik = parallel_mcmc(cmd, matrix_size=7)
     #Brute force
     #matrix, lik = brute_force(cmd)
     #brute force parallel
