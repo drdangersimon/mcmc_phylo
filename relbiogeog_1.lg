@@ -4,7 +4,7 @@
 treefile=relbiogeog_newtree.tre
 
 #the data
-datafile=dist_2.data
+datafile=dist_7_regions.data
 
 #from most recent to oldest 
 periods = 18.6302,1
@@ -13,7 +13,7 @@ ratematrix=mcmc_run.rm
 periods=20.0 
 
 #area names for the columns in test.data
-areanames = G N D E W M
+areanames = G N D E W M T
 
 #pound denotes a comment
 
