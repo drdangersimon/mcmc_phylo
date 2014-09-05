@@ -96,6 +96,9 @@ class PhyloSampler(object):
                    for walker in xrange(self.nwalkers)]
         return np.asarray(out_pos)
 
+
+
+
 def run(cmd, save_file, burnin=100, itter=10**4, rm_file='relbiogeog_1.lg',
          matrix_size=5):
     '''Does mcmc with an alfine sampler. Uses MPI for parallel'''
@@ -108,28 +111,51 @@ def run(cmd, save_file, burnin=100, itter=10**4, rm_file='relbiogeog_1.lg',
         pool.wait()
         posterior.clean()
         sys.exit(0)
-    print posterior.ndim
     sampler = emcee.EnsembleSampler(posterior.nwalkers, posterior.ndim, posterior, pool=pool)
     # burn in
     print 'Starting burn-in'
-    for pos, prob, rstate in sampler.sample(posterior.pos0(), iterations=burnin):
+    for pos0, prob, rstate in sampler.sample(posterior.pos0(), iterations=burnin):
         show = 'Burn-in: mean lik=%f,'% np.mean(prob)
-        show += 'std lik=%2.2,'%np.std(prob)
-        show += 'acceptance rate=%0.2'%np.nanmean(sampler.acceptance_fraction)
+        show += 'std lik=%2.2f,'%np.std(prob)
+        show += 'acceptance rate=%0.2f'%np.nanmean(sampler.acceptance_fraction)
         print show
     
     #pos, prob, rstate = sampler.sample(posterior.pos0(), iterations=burnin)
     # remove burin samples
-    # save sampler
-    pik.dump(sampler, open(save_file, 'w'), 2)
     sampler.reset()
-    print 'Starting run'
-    for pos, prob, rstate in sampler.run_mcmc(pos, itter/mpi.COMM_WORLD.size, rstate0=state):
-        show = 'Run: mean lik=%f,'% np.mean(prob)
-        show += 'std lik=%2.2,'%np.std(prob)
-        show += 'acceptance rate=%0.2'%np.nanmean(sampler.acceptance_fraction)
-    # save chains
-    
+    #save state every 100 iterations
+    i = 0
+    for pos, prob, rstate in sampler.sample(pos0, iterations=itter/mpi.COMM_WORLD.size, rstate0=rstate):
+        show = 'Run: mean lik=%f, '%np.mean(prob)
+        show += 'std lik=%2.2f, '%np.std(prob)
+        show += 'acceptance rate=%0.2f'%np.nanmean(sampler.acceptance_fraction)
+        print show
+        if i % 100 == 0:
+            pik.dump(sampler, open(save_file+'.bkup', 'w'), 2)
+    # save chains [prob, chain list]
+    pik.dump((sampler.flatlnprobability, sampler.flatchain),
+             open(save_file, 'w'), 2)
+    #flatten
+    flatten = lambda x, size: np.ravel(mm.get_mat(x, size))
+    param = np.asarray(map(flatten, sampler.flatchain, [matrix_size]*len(sampler.flatchain)))
+        
+    return sampler.flatlnprobability, param
+
+def mkhrd(s):
+    ''' takes string with spaces and makes header assuming raveled
+    indexs'''
+    matrix_size = len(s.split(' '))
+    s = s.split(' ')
+    return [x+y for x in s for y in s]
+
 if __name__ == '__main__':
     cmd = 'lagrange/src/lagrange_cpp'
-    run(cmd, 'test', matrix_size=7)
+    chi, mat_list = run(cmd, 'recovery', matrix_size=7)
+    # save as csv
+    # make header from areanames
+    header = mkhrd('G N D E W M T')
+    out = np.zeros((mat_list.shape[0], mat_list.shape[1] + 1))
+    out[:, 0] = chi
+    out[:,1:] = mat_list
+    np.savetxt('mcmcm_out.csv', out,
+               delimiter=',', header=header)
