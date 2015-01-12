@@ -20,6 +20,7 @@ class PhyloSampler(object):
         '''initalize stuff'''
         # make new file so no overwritting
         gid = mpi.COMM_WORLD.rank
+        self.gid = gid
         copyfile(rm_file, rm_file + str(gid))
         # Rename the temp matrix file
         relbiogeo = open(rm_file + str(gid))
@@ -38,8 +39,8 @@ class PhyloSampler(object):
         cpu_relbiogeo.close()
         # save paths for later
         self.cmd = cmd
-        self.rm_file = rm_file + str(gid)
-        self.matrix_path = '%i.rm'%gid
+        self.rm_file = rm_file #+ str(mpi.COMM_WORLD.rank)
+        self.matrix_path = '%i.rm'%mpi.COMM_WORLD.rank
         self.matrix_size = matrix_size
         # get dimenmsions and number of walkers
         self.ndim = self.get_dim()
@@ -51,8 +52,10 @@ class PhyloSampler(object):
     def lik(self, param):
         '''Likihood call from lagrange'''
         mat = mm.get_mat(param, self.matrix_size)
-        mm.write_matrix(mat, self.matrix_path)
-        return mm.call_laplace(self.cmd, self.rm_file)
+        # weird bug
+        mm.write_matrix(mat, '%i.rm'%mpi.COMM_WORLD.rank)
+        #mm.write_matrix(mat, self.matrix_path)
+        return mm.call_laplace(self.cmd, self.rm_file + str(mpi.COMM_WORLD.rank))
 
     def prior(self, param):
         '''Priors and constraints for the mcmc'''
@@ -99,7 +102,7 @@ class PhyloSampler(object):
 
 
 
-def run(cmd, save_file, burnin=100, itter=10**4, rm_file='relbiogeog_1.lg',
+def run(cmd, save_file, burnin=100, itter=10**6, rm_file='relbiogeog_1.lg',
          matrix_size=5):
     '''Does mcmc with an alfine sampler. Uses MPI for parallel'''
     assert not mpi is None, 'You must install mpi4py for this to work'
@@ -124,14 +127,21 @@ def run(cmd, save_file, burnin=100, itter=10**4, rm_file='relbiogeog_1.lg',
     # remove burin samples
     sampler.reset()
     #save state every 100 iterations
-    i = 0
+    i,j,ess = 0,0,0
     for pos, prob, rstate in sampler.sample(pos0, iterations=itter/mpi.COMM_WORLD.size, rstate0=rstate):
         show = 'Run: mean lik=%f, '%np.mean(prob)
         show += 'std lik=%2.2f, '%np.std(prob)
         show += 'acceptance rate=%0.2f'%np.nanmean(sampler.acceptance_fraction)
-        print show
+        print show, i,ess
         if i % 100 == 0:
             pik.dump(sampler, open(save_file+'.bkup', 'w'), 2)
+            ess = (sampler.flatchain.shape[0]/
+               np.nanmin(sampler.get_autocorr_time()))
+            if ess > 10**4:
+                j += 1
+                if j > 1:
+                    break
+        i += 1
     # save chains [prob, chain list]
     pik.dump((sampler.flatlnprobability, sampler.flatchain),
              open(save_file, 'w'), 2)
@@ -150,12 +160,20 @@ def mkhrd(s):
 
 if __name__ == '__main__':
     cmd = 'lagrange/src/lagrange_cpp'
-    chi, mat_list = run(cmd, 'recovery', matrix_size=7)
+    chi, mat_list = run(cmd, '5regions.csv', 1000, 10**6, rm_file='relbiogeog_5regions.lg', matrix_size=5)
     # save as csv
     # make header from areanames
-    header = mkhrd('G N D E W M T')
+    header = mkhrd('GC NAM D EA MED')
     out = np.zeros((mat_list.shape[0], mat_list.shape[1] + 1))
     out[:, 0] = chi
     out[:,1:] = mat_list
-    np.savetxt('mcmcm_out.csv', out,
+    np.savetxt('5_regions_final.csv', out,
+               delimiter=',', header=header)
+    # 7 regions
+    chi, mat_list = run(cmd, '7regions.csv', 1000, 10**6, rm_file='relbiogeog_7regions.lg', matrix_size=7)    
+    header = mkhrd('GC NAM D EA MED WA SA')
+    out = np.zeros((mat_list.shape[0], mat_list.shape[1] + 1))
+    out[:, 0] = chi
+    out[:,1:] = mat_list
+    np.savetxt('7_regions_final.csv', out,
                delimiter=',', header=header)
