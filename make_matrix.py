@@ -58,6 +58,7 @@ def chng_matrix_item(mat, index, values=[0, 0.5, 1]):
     return [list(i) for i in list(new_mat)], list(index)
         
 def write_matrix(mat, filename):
+    '''Writes matrix with .rm file from filename'''
     matrix_file = open(filename, 'w')
     for row in mat:
         matrix_file.write(' '.join(str(row)[1:-1].split(','))+'\n')
