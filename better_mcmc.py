@@ -128,22 +128,24 @@ def run(cmd, save_file, burnin=100, itter=10**6, rm_file='relbiogeog_1.lg',
     sampler.reset()
     #save state every 100 iterations
     i,j,ess = 0,0,0
-    for pos, prob, rstate in sampler.sample(pos0, iterations=itter/mpi.COMM_WORLD.size, rstate0=rstate):
+    for pos0, prob, rstate in sampler.sample(pos0, iterations=100, rstate0=rstate):
         show = 'Run: mean lik=%f, '%np.mean(prob)
         show += 'std lik=%2.2f, '%np.std(prob)
         show += 'acceptance rate=%0.2f'%np.nanmean(sampler.acceptance_fraction)
         print show, i,ess
         if i % 100 == 0:
             pik.dump(sampler, open(save_file+'.bkup', 'w'), 2)
-            ess = (sampler.flatchain.shape[0]/
+            ess = (sampler.iterations/
                np.nanmin(sampler.get_autocorr_time()))
             if ess > 10**4:
                 j += 1
                 if j > 1:
                     break
+                else:
+                    j = 0
         i += 1
     # save chains [prob, chain list]
-    pik.dump((sampler.flatlnprobability, sampler.flatchain),
+    pik.dump((sampler),
              open(save_file, 'w'), 2)
     #flatten
     flatten = lambda x, size: np.ravel(mm.get_mat(x, size))
@@ -160,20 +162,20 @@ def mkhrd(s):
 
 if __name__ == '__main__':
     cmd = 'lagrange/src/lagrange_cpp'
-    chi, mat_list = run(cmd, '5regions.csv', 1000, 10**6, rm_file='relbiogeog_5regions.lg', matrix_size=5)
+    chi, mat_list = run(cmd, '5regions.pik', 1000, 10**6, rm_file='relbiogeog_5regions.lg', matrix_size=5)
     # save as csv
     # make header from areanames
-    header = mkhrd('GC NAM D EA MED')
-    out = np.zeros((mat_list.shape[0], mat_list.shape[1] + 1))
-    out[:, 0] = chi
-    out[:,1:] = mat_list
-    np.savetxt('5_regions_final.csv', out,
-               delimiter=',', header=header)
+    #header = mkhrd('GC NAM D EA MED')
+    #out = np.zeros((mat_list.shape[0], mat_list.shape[1] + 1))
+    #out[:, 0] = chi
+    #out[:,1:] = mat_list
+    #np.savetxt('5_regions_final.csv', out,
+     #          delimiter=',', header=header)'''
     # 7 regions
-    chi, mat_list = run(cmd, '7regions.csv', 1000, 10**6, rm_file='relbiogeog_7regions.lg', matrix_size=7)    
-    header = mkhrd('GC NAM D EA MED WA SA')
-    out = np.zeros((mat_list.shape[0], mat_list.shape[1] + 1))
-    out[:, 0] = chi
-    out[:,1:] = mat_list
-    np.savetxt('7_regions_final.csv', out,
-               delimiter=',', header=header)
+    chi, mat_list = run(cmd, '7regions.pik', 1000, 10**6, rm_file='relbiogeog_7regions.lg', matrix_size=7)    
+    #header = mkhrd('GC NAM D EA MED WA SA')
+    #out = np.zeros((mat_list.shape[0], mat_list.shape[1] + 1))
+    #out[:, 0] = chi
+    #out[:,1:] = mat_list
+    #np.savetxt('7_regions_final.csv', out,
+    #           delimiter=',', header=header)
