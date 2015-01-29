@@ -1,9 +1,11 @@
 import make_matrix as mm
 import numpy as np
-import sys
+import sys, os
 import emcee
 import cPickle as pik
 from shutil import copyfile
+import ipdb
+import pymultinest
 try:
     import mpi4py.MPI as mpi
 except ImportError:
@@ -99,8 +101,90 @@ class PhyloSampler(object):
                    for walker in xrange(self.nwalkers)]
         return np.asarray(out_pos)
 
+class PhyloSampler_multinest(PhyloSampler):
+    '''just changes how the input and output of lik and prior'''
+
+    def lik(self, cube, ndim, nparams, lnew):
+        '''Likihood call from lagrange'''
+        # turn cube into param
+        param = np.asarray([0. for i in range(self.ndim)])
+        # add removed params
+        i = 0
+        for index in range(self.ndim):
+            # check if in constraints
+            for con_index in self.constraint:
+                if index == con_index[0]:
+                    param[index] = con_index[1]
+                    break
+            else:
+                param[index] = cube[i]
+                i += 1
+        mat = mm.get_mat(param, self.matrix_size)
+        # weird bug
+        mm.write_matrix(mat, '%i.rm'%mpi.COMM_WORLD.rank)
+        #mm.write_matrix(mat, self.matrix_path)
+        return mm.call_laplace(self.cmd, self.rm_file + str(mpi.COMM_WORLD.rank))
+
+    def prior(self, cube, ndim, nparams):
+        '''uniform prior and make some param delta function. No return!'''
+        pass
+        
+
+    def set_contraints(self, region1, region2, value, names):
+        '''Sets priors to delta functions on specific regions. Regions should be str'''
+        assert isinstance(region2, str) and isinstance(region1, str)
+        assert region2 in names and region1 in names
+        # make constraint files
+        if not hasattr(self, 'constraint'):
+            self.constraint = []
+        # sloppy!!! get coord for places
+        x ,y = np.triu_indices(self.matrix_size)
+        # remove diagonal terms
+        del_array = []
+        for i in xrange(len(x)):
+            if x[i] == y[i]:
+                del_array.append(i)
+        x = np.delete(x, del_array)
+        y = np.delete(y, del_array)
+        # find coords
+        for index in range(len(x)):
+            if names[x[index]] == region1 and names[y[index]] == region2:
+                self.constraint.append([index, value]) 
+            elif names[y[index]] == region1 and names[x[index]] == region2:
+                self.constraint.append([index, value])
 
 
+    def get_dim(self):
+        ''' Gets number of dimenmsions for model. With the constrains included'''
+        x ,y = np.triu_indices(self.matrix_size)
+        # remove diagonal terms
+        del_array = []
+        for i in xrange(len(x)):
+            if x[i] == y[i]:
+                del_array.append(i)
+        x = np.delete(x, del_array)
+        y = np.delete(y, del_array)
+        if not hasattr(self, 'constraint'):
+            self.constraint = []
+            return len(y)
+        else:
+            return len(y) - len(self.constraint)
+
+
+        #truncated normal beween 0 and 1
+def run_multinest(posterior, save_file):
+    '''Uses multinest sampler to calculate evidence instead of emceee
+    cmd is bash command to call lagrange_cpp
+    posterior is posterior class, should have methods prior and lik
+    save_file is path to save. will resume from file if arround'''
+    # checks
+    # if path exsissts
+    if not os.path.exists(save_file) and mpi.COMM_WORLD.rank == 0:
+        os.mkdir(save_file)
+    assert hasattr(posterior, 'prior') and hasattr(posterior, 'lik'), 'must have prior and lik methods'
+    # run sampler
+    pymultinest.run(posterior.lik, posterior.prior, posterior.get_dim(), 
+                        outputfiles_basename=save_file)
 
 def run(cmd, save_file, burnin=100, itter=10**6, rm_file='relbiogeog_1.lg',
          matrix_size=5):
@@ -128,13 +212,14 @@ def run(cmd, save_file, burnin=100, itter=10**6, rm_file='relbiogeog_1.lg',
     sampler.reset()
     #save state every 100 iterations
     i,j,ess = 0,0,0
-    for pos0, prob, rstate in sampler.sample(pos0, iterations=100, rstate0=rstate):
+    for pos, prob, rstate in sampler.sample(pos0, iterations=itter, rstate0=rstate):
         show = 'Run: mean lik=%f, '%np.mean(prob)
         show += 'std lik=%2.2f, '%np.std(prob)
         show += 'acceptance rate=%0.2f'%np.nanmean(sampler.acceptance_fraction)
         print show, i,ess
-        if i % 100 == 0:
-            pik.dump(sampler, open(save_file+'.bkup', 'w'), 2)
+        if i % 100 == 0 and i >1:
+            #ipdb.set_trace()
+            pik.dump((sampler.flatchain[:sampler.iterations], sampler.flatlnprobability[:sampler.iterations], pos, prob, rstate) , open(save_file+'.bkup', 'w'), 2)
             ess = (sampler.iterations/
                np.nanmin(sampler.get_autocorr_time()))
             if ess > 10**4:
@@ -145,7 +230,7 @@ def run(cmd, save_file, burnin=100, itter=10**6, rm_file='relbiogeog_1.lg',
                     j = 0
         i += 1
     # save chains [prob, chain list]
-    pik.dump((sampler),
+    pik.dump((sampler.flatchain,sampler.flatlnprobability, ess),
              open(save_file, 'w'), 2)
     #flatten
     flatten = lambda x, size: np.ravel(mm.get_mat(x, size))
@@ -153,29 +238,29 @@ def run(cmd, save_file, burnin=100, itter=10**6, rm_file='relbiogeog_1.lg',
         
     return sampler.flatlnprobability, param
 
-def mkhrd(s):
+def mkhrd(s, x, y):
     ''' takes string with spaces and makes header assuming raveled
     indexs'''
-    matrix_size = len(s.split(' '))
-    s = s.split(' ')
-    return [x+y for x in s for y in s]
+    # make sure indexs are same length
+    assert len(x) == len(y)
+    header = []
+    for i in range(len(x)):
+        header.append(s[x[i]]+'_'+s[y[i]])
+    return header
 
 if __name__ == '__main__':
     cmd = 'lagrange/src/lagrange_cpp'
-    chi, mat_list = run(cmd, '5regions.pik', 1000, 10**6, rm_file='relbiogeog_5regions.lg', matrix_size=5)
-    # save as csv
-    # make header from areanames
-    #header = mkhrd('GC NAM D EA MED')
-    #out = np.zeros((mat_list.shape[0], mat_list.shape[1] + 1))
-    #out[:, 0] = chi
-    #out[:,1:] = mat_list
-    #np.savetxt('5_regions_final.csv', out,
-     #          delimiter=',', header=header)'''
-    # 7 regions
-    chi, mat_list = run(cmd, '7regions.pik', 1000, 10**6, rm_file='relbiogeog_7regions.lg', matrix_size=7)    
-    #header = mkhrd('GC NAM D EA MED WA SA')
-    #out = np.zeros((mat_list.shape[0], mat_list.shape[1] + 1))
-    #out[:, 0] = chi
-    #out[:,1:] = mat_list
-    #np.savetxt('7_regions_final.csv', out,
-    #           delimiter=',', header=header)
+    # multinest run
+    posterior = PhyloSampler_multinest('lagrange/src/lagrange_cpp','relbiogeog_5regions.lg',5)
+    # set constraints
+    n = ['GC', 'NAM', 'D', 'EA', 'MED']
+    posterior.set_contraints('EA', 'NAM', 0., n)
+    posterior.set_contraints('EA', 'MED', 0., n)
+    posterior.set_contraints('EA', 'GC', 0., n)
+    posterior.set_contraints('D', 'MED', 0., n)
+ 
+    # run sampler
+    run_multinest(posterior, 'run_ix/')
+    #header = mkhrd(['GC', 'NAM', 'D', 'EA', 'MED'], x, y)
+
+    
